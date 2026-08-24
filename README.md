@@ -105,6 +105,12 @@ of at least 65,536 points are divided across up to 32 physical-core workers;
 smaller inputs stay serial to avoid thread-launch overhead. Contiguous float64
 NumPy inputs remain zero-copy through the CPU FFI boundary.
 
+Spherical conversion is the only kernel here with enough arithmetic intensity
+to plausibly benefit from a GPU. A GPU path was evaluated with 13,533 MiB free,
+but the pinned Mojo toolchain does not support float64 `sin` on NVIDIA GPUs.
+Using float32 would violate the existing parity tolerances, so no GPU path is
+exposed.
+
 Tests use `pye57`, which binds libE57Format, for a real file write/read and
 pose parity test. The binding does not expose raw compressed bytestreams, so
 codec byte parity uses an independent NumPy/Python reference transcribed from
@@ -114,15 +120,19 @@ invariants.
 
 ## Benchmarks
 
-Measured by `pixi run bench` on 2026-07-29 on an Intel Xeon E5-2697 v4 at
+Measured by `pixi run bench` on 2026-08-24 on an Intel Xeon E5-2697 v4 at
 2.30 GHz, 72 logical CPUs, Linux 6.8.0-136-generic. Each row uses 1,000,000
 records or points and reports the median of seven runs.
 
 | Kernel | Mojo ms | Reference | Reference ms | Speedup |
 |---|---:|---|---:|---:|
-| 12-bit integer decode | 4.635 | source-derived NumPy | 148.842 | 32.11x |
-| spherical to Cartesian | 26.443 | NumPy | 105.036 | 3.97x |
-| scan pose | 6.812 | pye57/NumPy | 45.398 | 6.66x |
+| 12-bit integer decode | 4.509 | source-derived NumPy | 56.336 | 12.49x |
+| spherical to Cartesian | 10.627 | NumPy | 104.638 | 9.85x |
+| scan pose | 5.903 | pye57/NumPy | 19.639 | 3.33x |
+
+The locked pre-optimization run on the same machine measured Mojo times of
+4.756 ms, 77.670 ms, and 5.272 ms respectively. The spherical kernel improved
+by 7.31x; the untouched codec and pose rows vary with concurrent system load.
 
 The benchmark performs parity assertions before timing and prints its machine
 description with the table.
