@@ -1,6 +1,5 @@
 """Compute kernels ported from libE57Format's compressed-vector path."""
 
-from std.algorithm import parallelize
 from std.math import atan2, cos, floor, sin, sqrt
 from std.sys.info import num_physical_cores, simd_width_of as simdwidthof
 
@@ -370,10 +369,8 @@ def spherical_to_cartesian(source: F64Ptr, n: Int, destination: F64Ptr):
             destination[3 * i + 1] = horizontal * sin(azimuth)
             destination[3 * i + 2] = radius * sin(elevation)
 
-    if workers > 1:
-        parallelize[process](workers, workers)
-    else:
-        process(0)
+    for worker in range(workers):
+        process(worker)
 
 
 # ASTM E57 coordinates used by libE57Format: include/E57SimpleData.h CartesianBounds
