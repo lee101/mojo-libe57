@@ -19,6 +19,7 @@ from e57 import (
     ip,
     quantize_scaled,
     spherical_to_cartesian,
+    spherical_to_cartesian_range,
 )
 
 
@@ -195,6 +196,18 @@ def e57_spherical_to_cartesian(
     if n > 0:
         spherical_to_cartesian(fp64(source), n, fp64(destination))
     return n
+
+
+@export("e57_spherical_to_cartesian_range")
+def e57_spherical_to_cartesian_range(
+    source: Int, destination: Int, start: Int, stop: Int
+) abi("C") -> Int:
+    """Convert points [start, stop); the shim fans this out across threads."""
+    if source == 0 or destination == 0 or start < 0 or stop < start:
+        return -1
+    if stop > start:
+        spherical_to_cartesian_range(fp64(source), fp64(destination), start, stop)
+    return stop - start
 
 
 @export("e57_cartesian_to_spherical")

@@ -100,9 +100,14 @@ structure-of-arrays bytestreams. Float streams use the host's native
 little-endian representation, matching the supported Linux x86-64 target.
 
 Spherical conversion uses native-width float64 SIMD with strided loads and
-stores over the interleaved point rows, followed by a scalar remainder. Inputs
-of at least 65,536 points are divided across up to 32 physical-core workers;
-smaller inputs stay serial to avoid thread-launch overhead. Contiguous float64
+stores over the interleaved point rows, followed by a scalar remainder. Each
+point costs four transcendental evaluations for 48 bytes touched, but the
+strided streams dominate, so the split is not worthwhile at ordinary point
+counts: measured on this box, eight workers score 0.6x at 65,536 points, 1.2x
+at 262,144, and 1.9x at one million. Inputs of at least 262,144 points are
+therefore split into contiguous spans across up to eight workers through a
+`ThreadPoolExecutor`; smaller inputs stay serial. The conversion is a pure
+elementwise map, so the split does not change any value. Contiguous float64
 NumPy inputs remain zero-copy through the CPU FFI boundary.
 
 Spherical conversion is the only kernel here with enough arithmetic intensity

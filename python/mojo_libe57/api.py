@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Iterable, Literal, Sequence
 
 import numpy as np
 
-from ._lib import addr, lib
+from ._lib import _spans, addr, lib, spherical_worker_count
 
 
 class E57CodecError(ValueError):
@@ -259,12 +260,24 @@ def decode_strings(
 def spherical_to_cartesian(points: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
     source = _f64_points(points)
     destination = np.empty_like(source)
-    if source.shape[0]:
-        _check(
-            lib().e57_spherical_to_cartesian(
-                addr(source), source.shape[0], addr(destination)
+    count = source.shape[0]
+    if not count:
+        return destination
+    workers = spherical_worker_count(count)
+    function = lib().e57_spherical_to_cartesian_range
+    if workers == 1:
+        _check(function(addr(source), addr(destination), 0, count))
+        return destination
+    arguments = (addr(source), addr(destination))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        written = list(
+            pool.map(
+                lambda span: function(*arguments, span[0], span[1]),
+                _spans(count, workers),
             )
         )
+    if sum(written) != count:
+        _check(min(written))
     return destination
 
 

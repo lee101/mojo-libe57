@@ -31,9 +31,35 @@ _SIGNATURES = {
     "e57_encode_strings": ([I, I, I, I, I, I], I),
     "e57_decode_strings": ([I, I, I, I, I, I], I),
     "e57_spherical_to_cartesian": ([I, I, I], I),
+    "e57_spherical_to_cartesian_range": ([I, I, I, I], I),
     "e57_cartesian_to_spherical": ([I, I, I], I),
     "e57_apply_pose": ([I, I, I] + [F] * 7, I),
 }
+
+# Four transcendental evaluations per point sounds arithmetic bound, but the
+# three strided streams and the three strided stores dominate. Measured on this
+# box, eight workers only overtake one core above roughly a quarter million
+# points (0.6x at 65k, 1.2x at 262k, 1.8x at 800k), so that is the cut-off.
+SPHERICAL_PARALLEL_POINTS = 262_144
+SPHERICAL_MAX_WORKERS = 8
+
+
+def _spans(total: int, parts: int) -> list[tuple[int, int]]:
+    """Split ``total`` points into ``parts`` contiguous, near-equal spans."""
+    step = -(-total // parts)
+    return [
+        (lo, min(lo + step, total)) for lo in range(0, total, step) if lo < total
+    ]
+
+
+def spherical_worker_count(points: int) -> int:
+    if points < SPHERICAL_PARALLEL_POINTS:
+        return 1
+    try:
+        available = len(os.sched_getaffinity(0))
+    except AttributeError:
+        available = os.cpu_count() or 1
+    return max(1, min(points, available, SPHERICAL_MAX_WORKERS))
 
 
 class BuildError(RuntimeError):

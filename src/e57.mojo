@@ -1,15 +1,12 @@
 """Compute kernels ported from libE57Format's compressed-vector path."""
 
-from max.algorithm import parallelize
 from std.math import atan2, cos, floor, sin, sqrt
-from std.sys.info import num_physical_cores, simd_width_of as simdwidthof
+from std.sys.info import simd_width_of as simdwidthof
 
 comptime BPtr = UnsafePointer[UInt8, AnyOrigin[mut=True]]
 comptime I64Ptr = UnsafePointer[Int64, AnyOrigin[mut=True]]
 comptime F32Ptr = UnsafePointer[Float32, AnyOrigin[mut=True]]
 comptime F64Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
-comptime SPHERICAL_PARALLEL_POINTS = 65536
-comptime SPHERICAL_MAX_WORKERS = 32
 
 
 @always_inline
@@ -336,44 +333,37 @@ def decode_strings(
 
 
 # ASTM E57 coordinates used by libE57Format: include/E57SimpleData.h SphericalBounds
-def spherical_to_cartesian(source: F64Ptr, n: Int, destination: F64Ptr):
+# Each point costs four transcendental evaluations for 48 bytes touched, so the
+# sweep is arithmetic bound and the shim splits the points across a thread pool.
+def spherical_to_cartesian_range(
+    source: F64Ptr, destination: F64Ptr, start: Int, stop: Int
+):
     comptime W = simdwidthof[DType.float64]()
-    var workers = 1
-    if n >= SPHERICAL_PARALLEL_POINTS:
-        workers = min(n, min(num_physical_cores(), SPHERICAL_MAX_WORKERS))
+    var vector_stop = start + (stop - start) // W * W
+    for i in range(start, vector_stop, W):
+        var radius = (source + 3 * i).strided_load[width=W](3)
+        var azimuth = (source + 3 * i + 1).strided_load[width=W](3)
+        var elevation = (source + 3 * i + 2).strided_load[width=W](3)
+        var horizontal = radius * cos(elevation)
+        (destination + 3 * i).strided_store[width=W](horizontal * cos(azimuth), 3)
+        (destination + 3 * i + 1).strided_store[width=W](
+            horizontal * sin(azimuth), 3
+        )
+        (destination + 3 * i + 2).strided_store[width=W](
+            radius * sin(elevation), 3
+        )
+    for i in range(vector_stop, stop):
+        var radius = source[3 * i]
+        var azimuth = source[3 * i + 1]
+        var elevation = source[3 * i + 2]
+        var horizontal = radius * cos(elevation)
+        destination[3 * i] = horizontal * cos(azimuth)
+        destination[3 * i + 1] = horizontal * sin(azimuth)
+        destination[3 * i + 2] = radius * sin(elevation)
 
-    @parameter
-    def process(worker: Int):
-        var start = worker * n // workers
-        var stop = (worker + 1) * n // workers
-        var vector_stop = start + (stop - start) // W * W
-        for i in range(start, vector_stop, W):
-            var radius = (source + 3 * i).strided_load[width=W](3)
-            var azimuth = (source + 3 * i + 1).strided_load[width=W](3)
-            var elevation = (source + 3 * i + 2).strided_load[width=W](3)
-            var horizontal = radius * cos(elevation)
-            (destination + 3 * i).strided_store[width=W](
-                horizontal * cos(azimuth), 3
-            )
-            (destination + 3 * i + 1).strided_store[width=W](
-                horizontal * sin(azimuth), 3
-            )
-            (destination + 3 * i + 2).strided_store[width=W](
-                radius * sin(elevation), 3
-            )
-        for i in range(vector_stop, stop):
-            var radius = source[3 * i]
-            var azimuth = source[3 * i + 1]
-            var elevation = source[3 * i + 2]
-            var horizontal = radius * cos(elevation)
-            destination[3 * i] = horizontal * cos(azimuth)
-            destination[3 * i + 1] = horizontal * sin(azimuth)
-            destination[3 * i + 2] = radius * sin(elevation)
 
-    if workers > 1:
-        parallelize[process](workers, workers)
-    else:
-        process(0)
+def spherical_to_cartesian(source: F64Ptr, n: Int, destination: F64Ptr):
+    spherical_to_cartesian_range(source, destination, 0, n)
 
 
 # ASTM E57 coordinates used by libE57Format: include/E57SimpleData.h CartesianBounds
